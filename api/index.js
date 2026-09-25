@@ -1,6 +1,8 @@
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { readSession } from '../server/auth/core.js';
+import { authConfig, handleAuth } from '../server/auth/routes.js';
 
 // Do not parse request bodies: upstream handlers enforce their own byte limits.
 export const config = { api: { bodyParser: false } };
@@ -46,6 +48,9 @@ export default async function handler(req, res) {
   url.searchParams.delete('__path');
   const pathname = rewrittenPath === null ? url.pathname : `/api/${rewrittenPath}`;
   req.url = pathname + url.search;
+  if (await handleAuth(req, res, pathname, url)) return;
+  if (pathname !== '/api/health' && !(await readSession(req.headers.cookie, authConfig().secret)))
+    return json(res, 401, { error: 'Sign in with Delegate to use this deployment.' });
   if (pathname === '/api/health') {
     return json(res, 200, {
       ok: true, runtime: 'vercel', mode: 'keyless',

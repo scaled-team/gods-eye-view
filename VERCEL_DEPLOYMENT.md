@@ -5,8 +5,13 @@ single Vercel function. Use Node 24.x and the settings in `vercel.json`.
 
 ## Deployment boundary
 
-- Deploy as a **preview**, retaining Vercel Authentication. Do not promote to an
-  unprotected production domain without explicitly reviewing access controls.
+- Every page and API route requires a **SysOp (Delegate Login) session**.
+  `middleware.js` gates `/` and `/api/*`; `api/index.js` checks the session
+  again. Only `/api/auth/*`, `/api/health` and the static sign-in pages under
+  `/auth/` are public. Preview deployments keep Vercel Authentication.
+- Production is `https://godseye.delegate.ws`, framed by Delegate V2 as the
+  native `godseye` app (sandbox profile `godseye-v1`). `frame-ancestors` allows
+  `'self'`, `*.delegate.ws` and `*.omnicart.cc`.
 - No API credentials are committed or configured for the initial deployment.
 - Remote provider-key setup is disabled. Never enable the local `.env` editor on
   hosted infrastructure.
@@ -17,6 +22,21 @@ single Vercel function. Use Node 24.x and the settings in `vercel.json`.
   globally shared. A shared cache is recommended before expanding usage.
 - Long-running radio/video streams and large provider responses may hit Vercel
   duration or payload limits. This is not a claim of full upstream feature parity.
+
+## Sign-in
+
+- SysOp OIDC public client `godseye-web` (PKCE, no client secret), redirect
+  `https://godseye.delegate.ws/api/auth/callback`, Google login. The ID token is
+  verified against the issuer's JWKS (issuer, audience, azp, expiry, nonce,
+  verified email).
+- Session: an HS256 cookie `__Host-gev_session`, 12 hours, signed with
+  `GODSEYE_SESSION_SECRET` (Vercel sensitive env, production only, at least 32
+  characters). Without it every sign-in route returns 503 and nothing opens.
+  Optional: `SYSOP_OIDC_ISSUER`, `SYSOP_OIDC_CLIENT_ID`.
+- Framed in Delegate V2, SysOp and Google cannot render in the frame, so the
+  sign-in page opens a popup. The popup posts back a 60-second code bound to a
+  nonce that only the frame holds; the frame redeems it at
+  `/api/auth/embed-session` for a `SameSite=None; Partitioned` session cookie.
 
 ## Verification
 
