@@ -52,3 +52,16 @@ runtime. `/api/setup/keys` must return 404 and paid/persistent features must ret
 An upstream refusal must not be reported as a successful live feed.
 
 Upstream: https://github.com/bilawalsidhu/gods-eye-view
+
+## CI and deploys
+
+- CI runs on Gitea (`git.delegate.ws/ScaledByDesign/gods-eye-view`,
+  `.gitea/workflows/ci.yml`): formatting, package boundaries, unit tests
+  (including `server/auth`) and the production build. The Gitea copy is
+  push-fed: after a merge on GitHub, `git push gitea origin/main:refs/heads/main`.
+  The upstream GitHub Actions workflow is removed; GitHub Actions is not a gate.
+- Production deploys: the Vercel Git integration did not deploy on merge
+  (2026-09-25), so production is deployed with `vercel deploy --prod` from a
+  clean checkout of `main`. A Gitea deploy job needs a Vercel CI token, which
+  must reach Gitea through Connect rather than by hand; Connect has no action
+  that issues one yet.

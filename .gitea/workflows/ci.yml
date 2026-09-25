@@ -1,0 +1,46 @@
+# Gitea Actions on core2: the CI gate for this fork (GitHub Actions is not a
+# gate here). Runs on every push to main and on pull requests.
+# Deploys are not wired yet: production is deployed with the Vercel CLI until
+# Connect can deliver a Vercel CI token (see VERCEL_DEPLOYMENT.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: hyper-ci
+    container:
+      image: node:24-bookworm
+    timeout-minutes: 30
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: '1'
+      # Allocation budgets are calibrated on Node 24.14.0 only; the shared
+      # runner's image floats within 24.x, so report rather than fail them.
+      GEV_REQUIRE_ALLOCATION_GATE: '0'
+      NPM_CONFIG_CACHE: /opt/hostedtoolcache/_cache/npm
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Check package boundaries
+        run: npm run check:boundaries
+
+      - name: Run unit tests (includes server/auth)
+        run: npm test
+
+      - name: Build production bundle
+        run: npm run build
