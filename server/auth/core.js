@@ -128,12 +128,14 @@ export function cookie(name, value, maxAge, { embedded = false } = {}) {
   return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; ${site}`;
 }
 
-export async function readSession(cookieHeader, secret) {
+/** A valid session whose email is still allowed, so removing an account takes effect at once. */
+export async function readSession(cookieHeader, secret, allowed) {
   if (!secret) return null;
   const token = readCookie(cookieHeader, SESSION_COOKIE);
   if (!token) return null;
   try {
-    return await verifyToken(token, secret, 'session');
+    const session = await verifyToken(token, secret, 'session');
+    return session && isAllowedEmail(session.email, allowed) ? session : null;
   } catch {
     return null;
   }
@@ -208,7 +210,7 @@ export async function verifyIdToken(
   if (
     typeof claims.email !== 'string' ||
     !claims.email ||
-    claims.email_verified === false
+    claims.email_verified !== true
   )
     throw new Error('id_token has no verified email');
   return {
@@ -223,6 +225,20 @@ export async function verifyIdToken(
  * identity alone is not authorization. Only listed emails or domains get in;
  * an empty list admits no one.
  */
+const list = (value) =>
+  String(value ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+/** GODSEYE_ALLOWED_EMAILS / GODSEYE_ALLOWED_DOMAINS; unset domains mean scaledbydesign.com. */
+export function allowedAccounts(env) {
+  return {
+    emails: list(env.GODSEYE_ALLOWED_EMAILS),
+    domains: list(env.GODSEYE_ALLOWED_DOMAINS ?? 'scaledbydesign.com'),
+  };
+}
+
 export function isAllowedEmail(email, { emails = [], domains = [] } = {}) {
   if (typeof email !== 'string' || !email.includes('@')) return false;
   const address = email.toLowerCase();

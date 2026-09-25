@@ -10,6 +10,7 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
   cookie,
+  allowedAccounts,
   isAllowedEmail,
   readCookie,
   readSession,
@@ -26,12 +27,6 @@ export const EMBED_HEADER = 'x-godseye-embed';
 const POPUP_COMPLETE_PATH = '/auth/popup-complete.html';
 const MAX_BODY_BYTES = 4096;
 
-const list = (value) =>
-  String(value ?? '')
-    .split(',')
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
-
 export function authConfig(env = process.env) {
   return {
     issuer: env.SYSOP_OIDC_ISSUER || DEFAULT_ISSUER,
@@ -39,10 +34,7 @@ export function authConfig(env = process.env) {
     secret: env.GODSEYE_SESSION_SECRET || '',
     // Pinned in production so redirect_uri and the Origin check never follow a Host header.
     publicOrigin: env.GODSEYE_PUBLIC_ORIGIN || '',
-    allowed: {
-      emails: list(env.GODSEYE_ALLOWED_EMAILS),
-      domains: list(env.GODSEYE_ALLOWED_DOMAINS ?? 'scaledbydesign.com'),
-    },
+    allowed: allowedAccounts(env),
   };
 }
 
@@ -288,7 +280,11 @@ export async function handleAuth(
     else if (pathname === '/api/auth/embed-session')
       await embedSession(req, res, config);
     else if (pathname === '/api/auth/me' && req.method === 'GET') {
-      const session = await readSession(req.headers.cookie, config.secret);
+      const session = await readSession(
+        req.headers.cookie,
+        config.secret,
+        config.allowed,
+      );
       if (session)
         send(res, 200, { email: session.email, name: session.name }, json);
       else send(res, 401, { error: 'Not signed in' }, json);

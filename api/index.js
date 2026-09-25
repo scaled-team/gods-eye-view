@@ -49,7 +49,8 @@ export default async function handler(req, res) {
   const pathname = rewrittenPath === null ? url.pathname : `/api/${rewrittenPath}`;
   req.url = pathname + url.search;
   if (await handleAuth(req, res, pathname, url)) return;
-  if (pathname !== '/api/health' && !(await readSession(req.headers.cookie, authConfig().secret)))
+  const auth = authConfig();
+  if (pathname !== '/api/health' && !(await readSession(req.headers.cookie, auth.secret, auth.allowed)))
     return json(res, 401, { error: 'Sign in with Delegate to use this deployment.' });
   if (pathname === '/api/health') {
     return json(res, 200, {

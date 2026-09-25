@@ -101,7 +101,7 @@ test('ID tokens are checked for signature, issuer, audience, azp, expiry, nonce 
   assert.deepEqual(await verifyIdToken(await idToken(), context), { sub: 'user-1', email: 'pat@example.com', name: 'Pat' });
   const bad = [
     { iss: 'https://other/oauth' }, { aud: 'someone-else' }, { azp: 'someone-else' },
-    { exp: Math.floor(Date.now() / 1000) - 1 }, { nonce: 'n2' }, { email_verified: false }, { email: undefined },
+    { exp: Math.floor(Date.now() / 1000) - 1 }, { nonce: 'n2' }, { email_verified: false }, { email_verified: undefined }, { email: undefined },
   ];
   for (const overrides of bad) await assert.rejects(verifyIdToken(await idToken(overrides), context));
   await assert.rejects(verifyIdToken(await idToken({}, { alg: 'HS256', kid: 'k1' }), context));
@@ -135,7 +135,7 @@ test('top-level sign-in sets a Lax session and returns to the requested path', a
   assert.match([].concat(login.headers['Set-Cookie'])[0], /HttpOnly; Secure; SameSite=Lax/);
   assert.equal(callback.status, 302);
   assert.equal(callback.headers.Location, '/?x=1');
-  const session = await readSession(`${SESSION_COOKIE}=${cookieValue(callback, SESSION_COOKIE)}`, SECRET);
+  const session = await readSession(`${SESSION_COOKIE}=${cookieValue(callback, SESSION_COOKIE)}`, SECRET, config.allowed);
   assert.equal(session.email, 'pat@example.com');
 });
 
@@ -161,7 +161,7 @@ test('framed sign-in hands off a code that only the nonce holder can redeem', as
   const ok = await redeem({ code, nonce });
   assert.equal(ok.status, 204);
   assert.match([].concat(ok.headers['Set-Cookie'])[0], /HttpOnly; Secure; SameSite=None; Partitioned/);
-  const session = await readSession(`${SESSION_COOKIE}=${cookieValue(ok, SESSION_COOKIE)}`, SECRET);
+  const session = await readSession(`${SESSION_COOKIE}=${cookieValue(ok, SESSION_COOKIE)}`, SECRET, config.allowed);
   assert.equal(session.typ, 'session');
   assert.equal(session.email, 'pat@example.com');
   // A session token is not a handoff code.
@@ -179,13 +179,16 @@ test('a bad embed nonce is refused before any redirect, and an unconfigured depl
 test('the middleware lets signed-in requests through and gates everything else', async () => {
   const { default: middleware } = await import('../../middleware.js');
   process.env.GODSEYE_SESSION_SECRET = SECRET;
-  const session = await signToken({ typ: 'session', sub: 'u', email: 'a@b.c' }, SECRET, 60);
+  const session = await signToken({ typ: 'session', sub: 'u', email: 'pat@scaledbydesign.com' }, SECRET, 60);
+  const outsider = await signToken({ typ: 'session', sub: 'o', email: 'pat@example.com' }, SECRET, 60);
   const run = (path, cookie) => middleware(new Request(`https://${HOST}${path}`, { headers: cookie ? { cookie } : {} }));
   assert.equal((await run('/', `${SESSION_COOKIE}=${session}`)).headers.get('x-middleware-next'), '1');
   assert.equal((await run('/api/auth/login')).headers.get('x-middleware-next'), '1');
   assert.equal((await run('/api/flights')).status, 401);
   assert.equal((await run('/api/flights', `${SESSION_COOKIE}=${session}x`)).status, 401);
   assert.equal((await run('/')).headers.get('x-middleware-rewrite'), `https://${HOST}/auth/signin.html`);
+  // A valid session for an account no longer on the allowlist is refused.
+  assert.equal((await run('/api/flights', `${SESSION_COOKIE}=${outsider}`)).status, 401);
 });
 
 test('the API function refuses provider routes without a session', async () => {
