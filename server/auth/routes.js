@@ -10,6 +10,7 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
   cookie,
+  isAllowedEmail,
   readCookie,
   readSession,
   randomToken,
@@ -25,11 +26,23 @@ export const EMBED_HEADER = 'x-godseye-embed';
 const POPUP_COMPLETE_PATH = '/auth/popup-complete.html';
 const MAX_BODY_BYTES = 4096;
 
+const list = (value) =>
+  String(value ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
 export function authConfig(env = process.env) {
   return {
     issuer: env.SYSOP_OIDC_ISSUER || DEFAULT_ISSUER,
     clientId: env.SYSOP_OIDC_CLIENT_ID || DEFAULT_CLIENT_ID,
     secret: env.GODSEYE_SESSION_SECRET || '',
+    // Pinned in production so redirect_uri and the Origin check never follow a Host header.
+    publicOrigin: env.GODSEYE_PUBLIC_ORIGIN || '',
+    allowed: {
+      emails: list(env.GODSEYE_ALLOWED_EMAILS),
+      domains: list(env.GODSEYE_ALLOWED_DOMAINS ?? 'scaledbydesign.com'),
+    },
   };
 }
 
@@ -56,9 +69,12 @@ export function resetDiscoveryCache() {
   discoveryCache = undefined;
 }
 
-/** The deployment's own origin, from the host Vercel routed the request to. */
-function ownOrigin(req) {
-  return `https://${String(req.headers.host ?? '').toLowerCase()}`;
+/** The deployment's own origin: pinned by config, else the host Vercel routed to. */
+function ownOrigin(req, config) {
+  return (
+    config.publicOrigin ||
+    `https://${String(req.headers.host ?? '').toLowerCase()}`
+  );
 }
 
 function send(res, status, body, headers = {}) {
@@ -119,7 +135,7 @@ async function login(req, res, url, config, fetchImpl) {
   authorize.search = new URLSearchParams({
     response_type: 'code',
     client_id: config.clientId,
-    redirect_uri: `${ownOrigin(req)}/api/auth/callback`,
+    redirect_uri: `${ownOrigin(req, config)}/api/auth/callback`,
     scope: 'openid profile email',
     state,
     nonce,
@@ -157,7 +173,7 @@ async function callback(req, res, url, config, fetchImpl) {
     body: new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: `${ownOrigin(req)}/api/auth/callback`,
+      redirect_uri: `${ownOrigin(req, config)}/api/auth/callback`,
       client_id: config.clientId,
       code_verifier: oauth.verifier,
     }),
@@ -165,12 +181,29 @@ async function callback(req, res, url, config, fetchImpl) {
   if (!tokenResponse.ok)
     throw new Error(`token exchange ${tokenResponse.status}`);
   const { id_token: idToken } = await tokenResponse.json();
-  const identity = await verifyIdToken(idToken, {
-    jwks: oidc.jwks,
-    issuer: config.issuer,
-    clientId: config.clientId,
-    nonce: oauth.nonce,
-  });
+  const verify = (jwks) =>
+    verifyIdToken(idToken, {
+      jwks,
+      issuer: config.issuer,
+      clientId: config.clientId,
+      nonce: oauth.nonce,
+    });
+  let identity;
+  try {
+    identity = await verify(oidc.jwks);
+  } catch (error) {
+    // SysOp rotated its signing key since this instance cached the JWKS.
+    if (error?.message !== 'id_token signing key not found') throw error;
+    resetDiscoveryCache();
+    identity = await verify((await discover(config.issuer, fetchImpl)).jwks);
+  }
+  if (!isAllowedEmail(identity.email, config.allowed))
+    return send(
+      res,
+      403,
+      { error: 'This account is not allowed to use GodsEye.' },
+      { 'Content-Type': 'application/json', 'Set-Cookie': [clearOauth] },
+    );
   const session = await signToken(
     sessionClaims(identity),
     config.secret,
@@ -197,7 +230,7 @@ async function embedSession(req, res, config) {
   // A custom header forces a CORS preflight; Origin must be this deployment.
   if (
     req.headers[EMBED_HEADER] !== '1' ||
-    req.headers.origin !== ownOrigin(req)
+    req.headers.origin !== ownOrigin(req, config)
   )
     return send(res, 403, { error: 'Forbidden' }, json);
   let body;
@@ -210,7 +243,11 @@ async function embedSession(req, res, config) {
   const handoff = EMBED_NONCE_PATTERN.test(nonce)
     ? await verifyToken(body.code, config.secret, 'handoff')
     : null;
-  if (!handoff || handoff.nh !== (await sha256(nonce)))
+  if (
+    !handoff ||
+    handoff.nh !== (await sha256(nonce)) ||
+    !isAllowedEmail(handoff.email, config.allowed)
+  )
     return send(
       res,
       401,

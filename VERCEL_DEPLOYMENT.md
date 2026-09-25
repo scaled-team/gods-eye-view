@@ -33,6 +33,12 @@ single Vercel function. Use Node 24.x and the settings in `vercel.json`.
   `GODSEYE_SESSION_SECRET` (Vercel sensitive env, production only, at least 32
   characters). Without it every sign-in route returns 503 and nothing opens.
   Optional: `SYSOP_OIDC_ISSUER`, `SYSOP_OIDC_CLIENT_ID`.
+- Authorization: SysOp creates an account for any Google user, so a SysOp
+  identity alone does not get in. The email must be in `GODSEYE_ALLOWED_EMAILS`
+  or its domain in `GODSEYE_ALLOWED_DOMAINS` (comma-separated; unset means
+  `scaledbydesign.com`, empty means no one). Others get 403 and no session.
+- `GODSEYE_PUBLIC_ORIGIN=https://godseye.delegate.ws` in production pins the
+  OAuth `redirect_uri` and the embed Origin check instead of trusting Host.
 - Framed in Delegate V2, SysOp and Google cannot render in the frame, so the
   sign-in page opens a popup. The popup posts back a 60-second code bound to a
   nonce that only the frame holds; the frame redeems it at

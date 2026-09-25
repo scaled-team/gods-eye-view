@@ -217,3 +217,17 @@ export async function verifyIdToken(
     name: typeof claims.name === 'string' ? claims.name : null,
   };
 }
+
+/**
+ * SysOp creates an account for any Google user on first sign-in, so SysOp
+ * identity alone is not authorization. Only listed emails or domains get in;
+ * an empty list admits no one.
+ */
+export function isAllowedEmail(email, { emails = [], domains = [] } = {}) {
+  if (typeof email !== 'string' || !email.includes('@')) return false;
+  const address = email.toLowerCase();
+  return (
+    emails.includes(address) ||
+    domains.includes(address.slice(address.lastIndexOf('@') + 1))
+  );
+}
