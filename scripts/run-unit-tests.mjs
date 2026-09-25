@@ -35,6 +35,7 @@ export function discoverUnitTestFiles(root = process.cwd()) {
     }
   };
   visit(sourceRoot);
+  visit(path.join(root, 'server', 'auth'));
   return files.sort();
 }
 
